@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+
+# Local run artifacts
+nohup*.out
+
+# Local model/run outputs
+results/

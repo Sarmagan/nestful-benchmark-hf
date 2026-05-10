@@ -2,6 +2,7 @@ import argparse
 import copy
 import json
 import os
+import re
 from typing import Dict, List
 
 import torch
@@ -31,6 +32,16 @@ COT_JSON_RULES = (
     "Do not wrap the JSON in markdown fences."
 )
 
+REACT_RULES = (
+    "Use the ReAct format with repeated blocks: "
+    "Thought: <brief reasoning>, Action: <single JSON object>, Observation: <result needed for next step>. "
+    "Each Action must be a JSON object with exactly this schema: "
+    "{\"name\": str, \"label\": \"$var_n\", \"arguments\": {...}}. "
+    "Use labels like $var_1, $var_2, ... and references like \"$var_1.result$\" for nested steps. "
+    "At the end, output 'Final Answer: done'. "
+    "Do not use markdown code fences."
+)
+
 SYSTEM_PROMPT_BY_BASELINE = {
     "vanilla": (
         "You are a tool-calling assistant. "
@@ -45,6 +56,10 @@ SYSTEM_PROMPT_BY_BASELINE = {
         "First, think through the problem step by step in plain text (brief steps). "
         "Then output your final answer. "
         + COT_JSON_RULES
+    ),
+    "react": (
+        "You are a tool-calling assistant using ReAct (Reasoning + Acting). "
+        + REACT_RULES
     ),
 }
 
@@ -77,7 +92,7 @@ def build_messages(sample: Dict, baseline: str, icl_str: str) -> List[Dict]:
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_name", type=str, default=None)
-    parser.add_argument("--baseline", type=str, default="vanilla", choices=["vanilla", "icl", "cot"])
+    parser.add_argument("--baseline", type=str, default="vanilla", choices=["vanilla", "icl", "cot", "react"])
     parser.add_argument("--dataset", type=str, default="data_v2/nestful_data.jsonl")
     parser.add_argument("--max_examples", type=int, default=100)
     parser.add_argument("--save_directory", type=str, default="results")
@@ -88,6 +103,52 @@ def parse_args():
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--disable_8bit", action="store_true")
     return parser.parse_args()
+
+
+def _extract_react_actions_as_list(generated_text: str) -> str:
+    """
+    Convert ReAct Action blocks to a strict JSON list string.
+    This minimizes parser failures in the benchmark scorer.
+    """
+    cleaned = (
+        generated_text.replace("```json", "")
+        .replace("```", "")
+        .replace("<think>", "")
+        .replace("</think>", "")
+        .strip()
+    )
+    blocks = re.findall(
+        r"Action:\s*([\s\S]*?)(?=\n(?:Thought:|Observation:|Final Answer:|Action:)|\Z)",
+        cleaned,
+    )
+    action_dicts = []
+    for block in blocks:
+        start = block.find("{")
+        if start == -1:
+            continue
+        depth = 0
+        end = None
+        for i, ch in enumerate(block[start:], start=start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            continue
+        candidate = block[start : end + 1]
+        try:
+            obj = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(obj, dict) and "name" in obj:
+            action_dicts.append(obj)
+
+    if action_dicts:
+        return json.dumps(action_dicts, ensure_ascii=False)
+    return generated_text.strip()
 
 
 def main():
@@ -166,6 +227,8 @@ def main():
 
         prompt_len = model_inputs["input_ids"].shape[1]
         generated_text = tokenizer.decode(generated[0][prompt_len:], skip_special_tokens=True).strip()
+        if baseline == "react":
+            generated_text = _extract_react_actions_as_list(generated_text)
 
         outputs.append(
             {

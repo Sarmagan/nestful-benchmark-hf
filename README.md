@@ -79,6 +79,22 @@ python -u src/run_hf_local.py \
   --max_new_tokens 1024
 ```
 
+### ReAct Baseline (reason + action blocks, no ICL)
+
+Implements ReAct-style `Thought / Action / Observation` prompting.  
+For strict benchmark parsing, generated `Action:` JSON objects are normalized into one JSON list before scoring.
+
+```bash
+python -u src/run_hf_local.py \
+  --run_name "qwen3-8b-8bit-react" \
+  --baseline "react" \
+  --dataset "data_v2/nestful_data.jsonl" \
+  --executable_func_dir "data_v2/executable_functions" \
+  --save_directory "results" \
+  --temperature 0.0 \
+  --max_new_tokens 1024
+```
+
 ## 4) Optional Variants
 
 ### Disable 8-bit Quantization
@@ -105,6 +121,8 @@ python -u src/run_hf_local.py \
   - `results/nestful_0/qwen3-8b-8bit-vanilla/output.jsonl`
 - CoT:
   - `results/nestful_0/qwen3-8b-8bit-cot/output.jsonl` (example path; matches your `--run_name`)
+- ReAct:
+  - `results/nestful_0/qwen3-8b-8bit-react/output.jsonl` (example path; matches your `--run_name`)
 - ICL:
   - `results/nestful_3/qwen3-8b-8bit-icl3/output.jsonl`
 

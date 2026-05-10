@@ -12,6 +12,7 @@ QWEN_LOCAL_MODEL_NAMES = (
     "vanilla-agent",
     "icl-agent",
     "cot-agent",
+    "react-agent",
 )
 
 def listit(t):
