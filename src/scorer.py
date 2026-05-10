@@ -7,27 +7,12 @@ from sklearn.metrics import accuracy_score
 def handler(signum, frame): 
     raise TimeoutError("Time limit exceeded!") 
 
-DEEPSEEK = [
-    "DeepSeek-V3",
-    "DeepSeek-R1"
-]
-
-GRANITE_MODELS = [
-    "granite-3.0-8b-instruct",
-    "granite-3.0-8b-instruct-FT",
-]
-
-GRANITE_3_1_MODELS = [
-    "granite-3.1-8b-instruct"
-]
-
-LLAMA_MODELS = [
-    "Llama-3.1-8B-Instruct",
-    "llama-3-1-70b-instruct",
-    "llama-3-1-405b-instruct-fp8",
-    "Llama-3.2-11B-Vision-Instruct",
-    "Llama-3.2-90B-Vision-Instruct"
-]
+# Local Hugging Face Qwen runs (run_hf_local.py).
+QWEN_LOCAL_MODEL_NAMES = (
+    "vanilla-agent",
+    "icl-agent",
+    "cot-agent",
+)
 
 def listit(t):
     return list(map(listit, t)) if isinstance(t, (list, tuple)) else t
@@ -64,12 +49,28 @@ def calculate_ans(func_calls, spec_lib, executable_func_dir):
                     v = v[1:-1]
                     v_l = v.split(".",1)[0]
                     out_param = v.split(".",1)[1]
-                    v = variable_result_map[v_l][out_param]
+                    if v_l not in variable_result_map:
+                        return False
+                    # Many model outputs use ".result" regardless of the tool's actual
+                    # output key (e.g. "output_0"). Fall back to the sole output value.
+                    if out_param in variable_result_map[v_l]:
+                        v = variable_result_map[v_l][out_param]
+                    elif out_param == "result" and len(variable_result_map[v_l]) == 1:
+                        v = next(iter(variable_result_map[v_l].values()))
+                    else:
+                        return False
                 elif  type(v) == str and v.startswith("$var"):
                     v = v[1:]
                     v_l = v.split(".",1)[0]
                     out_param = v.split(".",1)[1]
-                    v = variable_result_map[v_l][out_param]
+                    if v_l not in variable_result_map:
+                        return False
+                    if out_param in variable_result_map[v_l]:
+                        v = variable_result_map[v_l][out_param]
+                    elif out_param == "result" and len(variable_result_map[v_l]) == 1:
+                        v = next(iter(variable_result_map[v_l].values()))
+                    else:
+                        return False
                 arg_val_list.append(v)
                 arg_values.append(str(v))
 
@@ -165,30 +166,12 @@ def calculate_scores(predictions, model_name, executable_func_dir, intents_only=
     for item in tqdm(predictions):
         pred_has_parsing_errors = False
         pred_func_calls, gold_func_calls = [], []
-        if model_name == 'Granite-20B-FunctionCalling':
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_granite_20b_function_calling_output(item, num_errors_parsing_pred_intent)
-        elif model_name == 'llama-3-70b-instruct' or model_name == "llama-3-1-405b-instruct":
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_llama_3_70b_instruct(item, num_errors_parsing_pred_intent)
-        elif model_name == 'Mistral-7B-Instruct-v0.3' or model_name == "mixtral_8x7b_instruct_v01" or model_name == "Mixtral-8x22B-Instruct-v0.1":
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_mistral_7b_instruct_v0_3(item, num_errors_parsing_pred_intent)
-        elif model_name == 'Hermes-2-Pro-Mistral-7B':
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_hermes_2_pro_mistral_7B(item, num_errors_parsing_pred_intent)
-        elif model_name in ['xLAM-1b-fc-r', "xLAM-7b-fc-r", "xLAM-8x7b-r", "xLAM-8x22b-r"]:
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_xLAM_1b_fc_r(item, num_errors_parsing_pred_intent)
-        elif model_name == 'Hammer2.0-7b':
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_Hammer2_0_7b(item, num_errors_parsing_pred_intent)
-        elif model_name == 'ToolAce-8b':
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_ToolAce(item, num_errors_parsing_pred_intent)
-        elif model_name in GRANITE_MODELS:
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_granite_3_output(item, num_errors_parsing_pred_intent)
-        elif model_name in GRANITE_3_1_MODELS:
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_granite_3_1_output(item, num_errors_parsing_pred_intent)
-        elif model_name in LLAMA_MODELS:
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_llama_3_output(item, num_errors_parsing_pred_intent)
-        elif model_name in DEEPSEEK:
-            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_deepseek_output(item, num_errors_parsing_pred_intent)
+        if model_name in QWEN_LOCAL_MODEL_NAMES:
+            pred_func_calls, gold_func_calls, pred_dict_list, gold_dict_list, num_errors_parsing_pred_intent, pred_has_parsing_errors = parse_agent_output(
+                item, num_errors_parsing_pred_intent
+            )
         else:
-            raise Exception("model not handled")
+            raise Exception(f"model not handled: {model_name!r} (expected one of {list(QWEN_LOCAL_MODEL_NAMES)})")
 
         gold_apis_names, pred_apis_names = [], []
         for f in pred_func_calls:
